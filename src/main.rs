@@ -64,6 +64,7 @@ impl ExclusiveAllotmentProof<MySumCommitment> for MyExclusiveAllotmentProof {
 
         // Traverse the Merkle path from the leaf to the root
         for sibling_option in &self.path 
+
         {
             let sibling_commitment = match sibling_option {
                 Some(commitment) => commitment.clone(),
@@ -164,29 +165,47 @@ impl MerkleTree<MySumCommitment, MyExclusiveAllotmentProof> for MyMerkleTree
 
 
 
-    fn prove(&self, position: usize) -> MyExclusiveAllotmentProof {
-        unimplemented!();
-        // let tree_height = self.tree.len();
-        // let mut current_position = position;
-        // let mut siblings = vec![None; tree_height - 1];
-        // for height in 0..tree_height - 1 {
-        //     let sibling_position = if current_position % 2 == 0 {
-        //         current_position - 1
-        //     } else {
-        //         current_position + 1
-        //     };
-        //     if sibling_position < self.tree[height].len() {
-        //         siblings[height] = Some(self.tree[height][sibling_position].clone());
-        //     }
-        //     current_position /= 2;
-        // }
 
-        // MyExclusiveAllotmentProof {
-        //     position,
-        //     siblings,
-        // }
+    fn prove(&self, position: usize) -> MyExclusiveAllotmentProof 
+    {
+        let mut path: Vec<Option<MySumCommitment>> = Vec::new();
+        let tree_height = self.tree.len();
+        let mut current_position = position;
+
+        for level in 0..tree_height - 1 
+        {
+            let sibling_index = if current_position % 2 == 0 {
+                current_position + 1
+            } else {
+                current_position - 1
+            };
+
+            if sibling_index < self.tree[level].len() {
+                path.push(Some(self.tree[level][sibling_index].clone()));
+            } else {
+                path.push(None);
+            }
+
+            current_position /= 2;
+        }
+
+        println!("Proof path:");
+        for (level, commitment) in path.iter().enumerate() {
+            print!("Level {}: ", level);
+            if let Some(commitment) = commitment {
+                print!("{}  ", commitment.amount);
+            } else {
+                print!("None  ");
+            }
+            println!();
+        }
+
+        MyExclusiveAllotmentProof {
+            position,
+            sibling: path.first().cloned().unwrap_or(None),
+            path: path.clone(),
+        }
     }
-
 }
 
 
@@ -215,26 +234,31 @@ impl MerkleTree<MySumCommitment, MyExclusiveAllotmentProof> for MyMerkleTree
 
 
 fn main() {
-    // Example usage:
-    let values = vec![10, 20, 30, 40, 50];
+    let values = vec![10, 20, 30, 40, 50, 60, 70];
     let merkle_tree = MyMerkleTree::new(values.clone());
-    for i in merkle_tree.tree {
-        for j in i {
-            print!("{:?}  ", j.amount);
+
+    // Choose a position for which you want to generate the proof
+    let position = 6; // Change this to your desired position
+
+    // Iterate over the merkle_tree.tree by reference
+    for level in &merkle_tree.tree {
+        for commitment in level {
+            print!("{:?}  ", commitment.amount);
         }
         print!("\n");
     }
-    match merkle_tree.root_commitment 
-    {
-        Some(root) => {
-            print!("Root: {}", root.amount);
-        }
-        None => {
-            println!("Root commitment is not set.");
-    }
+
+    // Call the prove method
+    let proof = merkle_tree.prove(position);
+
+    // Now you can work with the `proof` variable as needed
+    // For example, you can print information about the proof:
+
+    // ... (Print the details of the generated proof)
+
+    
 }
 
-}
 
 // fn main() 
 // {
