@@ -1,5 +1,4 @@
 use sha2 ::{ Digest , Sha256 };
-use std::collections::VecDeque;
 
  pub trait SumCommitment {
     fn amount (&self) -> u64;
@@ -7,7 +6,6 @@ use std::collections::VecDeque;
  }
 
 #[derive(Clone)]
-#[derive(Debug)]
  struct MySumCommitment{
     amount: u64,
     digest: [u8; 32],
@@ -33,11 +31,13 @@ use std::collections::VecDeque;
 
 
 // Structure implementing the 'ExclusiveAllotmentProof' trait
-#[derive(Debug)]
 struct MyExclusiveAllotmentProof {
     position: usize,
     sibling: Option<MySumCommitment>,
+    path: Vec<Option<MySumCommitment>>,
 }
+
+
 
 impl ExclusiveAllotmentProof<MySumCommitment> for MyExclusiveAllotmentProof {
     fn position(&self) -> usize {
@@ -49,28 +49,25 @@ impl ExclusiveAllotmentProof<MySumCommitment> for MyExclusiveAllotmentProof {
         self.sibling.clone()
     }
 
-    fn verify(&self, root_commitment: &MySumCommitment) -> bool {
+    fn verify(&self, root_commitment: &MySumCommitment) -> bool
+    {
         // Verify exclusive allotment by checking if the provided commitment is consistent with the proof.
         // This involves reconstructing the Merkle path from the leaf to the root and comparing it to the
         // provided root commitment.
 
-        // Start with the provided leaf commitment
         let mut current_commitment = match self.sibling.clone() {
             Some(sibling_commitment) => sibling_commitment,
-            None => return false, // A leaf node should have a sibling commitment
+            None => return false,  // A leaf node should have a sibling commitment
         };
 
         let mut position = self.position;
 
         // Traverse the Merkle path from the leaf to the root
-        while position > 0 {
-            // Calculate the sibling position at the current level
-            let sibling_position = if position % 2 == 0 { position - 1 } else { position + 1 };
-
-            // Retrieve the sibling commitment
-            let sibling_commitment = match self.sibling(sibling_position.trailing_zeros() as u8) {
-                Some(commitment) => commitment,
-                None => return false, // Sibling not found in the proof
+        for sibling_option in &self.path 
+        {
+            let sibling_commitment = match sibling_option {
+                Some(commitment) => commitment.clone(),
+                None => return false,  // Sibling not found in the proof
             };
 
             // Combine the current commitment and the sibling commitment to calculate the parent commitment
@@ -101,97 +98,95 @@ impl ExclusiveAllotmentProof<MySumCommitment> for MyExclusiveAllotmentProof {
  }
 
 
-// Structure implementing the 'MerkleTree' trait
+// Structure implementing the MerkleTree trait with the modified structure
 struct MyMerkleTree {
-    commitments: Vec<MySumCommitment>,
-    root_commitment: MySumCommitment,
+    root_commitment: Option<MySumCommitment>, // Add a field to store the root commitment
+    tree: Vec<Vec<MySumCommitment>>,
 }
 
 impl MerkleTree<MySumCommitment, MyExclusiveAllotmentProof> for MyMerkleTree 
 {
     fn new(values: Vec<u64>) -> Self 
     {
-        let mut commitments: Vec<MySumCommitment> = vec![];
+        let mut tree: Vec<Vec<MySumCommitment>> = Vec::new();
+        let mut current_level: Vec<MySumCommitment> = values
+            .iter()
+            .map(|&value| {
+                MySumCommitment {
+                    amount: value,
+                    digest: hash_bytes(&value.to_be_bytes()),
+                }
+            })
+            .collect();
 
-        for &value in &values 
-        {
-            let leaf_commitment = MySumCommitment{
-                amount: value,
-                digest: hash_bytes(&value.to_be_bytes()),
-            };
-            print!("{}  ", leaf_commitment.amount);
-            commitments.push(leaf_commitment);
-        }
+        while current_level.len() > 1 {
+            let mut next_level: Vec<MySumCommitment> = Vec::new();
 
-        let mut next_level: Vec<MySumCommitment> = commitments.clone();
-        let mut current_level: Vec<MySumCommitment> = vec![];
-
-        while next_level.len() > 1 {
-            println!("\n");
-            for chunk in next_level.chunks(2) {
+            for chunk in current_level.chunks(2) {
                 let left = chunk[0].clone();
                 let right = chunk.get(1).cloned().unwrap_or(left.clone());
+
                 let mut combined_bytes = Vec::new();
+                let mut amount = left.amount;
                 combined_bytes.extend_from_slice(&left.digest);
-                let mut amount_odd = left.amount;
-                if left.digest != right.digest 
-                {
+                if left.digest != right.digest {
                     combined_bytes.extend_from_slice(&right.digest);
-                    amount_odd += right.amount;
+                    amount += right.amount
                 }
 
                 let parent_digest = hash_bytes(&combined_bytes);
 
-                let parent_commitment = MySumCommitment{
-                    amount: amount_odd,
+                let parent_commitment = MySumCommitment {
+                    amount,
                     digest: parent_digest,
                 };
-                print!("{:?} ", parent_commitment.amount);
 
-
-
-                current_level.push(parent_commitment);
+                next_level.push(parent_commitment);
             }
 
-            next_level = current_level.clone();
-            current_level.clear();
+            tree.push(current_level.clone());
+            current_level = next_level;
         }
+        tree.push(current_level.clone());
+
 
         MyMerkleTree {
-            commitments: next_level.clone(),
-            root_commitment: next_level[0].clone(),
+            root_commitment: Some(current_level[0].clone()), // Set root commitment to the final element
+            tree,
         }
     }
 
-    fn commit(&self) -> MySumCommitment {
-        self.root_commitment.clone()
+
+    fn commit(&self) -> MySumCommitment 
+    {
+        self.root_commitment.clone().expect("Root commitment is not set")
     }
+
+
 
     fn prove(&self, position: usize) -> MyExclusiveAllotmentProof {
-        // Generate a proof for the element at the specified position
-        // You need to return an ExclusiveAllotmentProof containing the sibling and position
-        // You also need to calculate the Merkle path from the leaf to the root
-        let mut path = VecDeque::new();
-        let mut position = position;
-        let mut height = 0;
-        while position > 0 {
-            let sibling_position = if position % 2 == 0 { position - 1 } else { position + 1 };
-            let sibling = if sibling_position < self.commitments.len() {
-                Some(self.commitments[sibling_position].clone())
-            } else {
-                None
-            };
+        unimplemented!();
+        // let tree_height = self.tree.len();
+        // let mut current_position = position;
+        // let mut siblings = vec![None; tree_height - 1];
+        // for height in 0..tree_height - 1 {
+        //     let sibling_position = if current_position % 2 == 0 {
+        //         current_position - 1
+        //     } else {
+        //         current_position + 1
+        //     };
+        //     if sibling_position < self.tree[height].len() {
+        //         siblings[height] = Some(self.tree[height][sibling_position].clone());
+        //     }
+        //     current_position /= 2;
+        // }
 
-
-            path.push_back(sibling);
-            position = position / 2;
-            height += 1;
-        }
-        MyExclusiveAllotmentProof {
-            position,
-            sibling: path.pop_front().unwrap(),
-        }
+        // MyExclusiveAllotmentProof {
+        //     position,
+        //     siblings,
+        // }
     }
+
 }
 
 
@@ -221,15 +216,25 @@ impl MerkleTree<MySumCommitment, MyExclusiveAllotmentProof> for MyMerkleTree
 
 fn main() {
     // Example usage:
-    let values = vec![10, 20, 30, 40];
+    let values = vec![10, 20, 30, 40, 50];
     let merkle_tree = MyMerkleTree::new(values.clone());
-
-
+    for i in merkle_tree.tree {
+        for j in i {
+            print!("{:?}  ", j.amount);
+        }
+        print!("\n");
+    }
+    match merkle_tree.root_commitment 
+    {
+        Some(root) => {
+            print!("Root: {}", root.amount);
+        }
+        None => {
+            println!("Root commitment is not set.");
+    }
 }
 
-
-
-
+}
 
 // fn main() 
 // {
@@ -253,3 +258,5 @@ fn main() {
 //         println!("Value: {}, Hash (Hex): {}", value, hash_hex);
 //     }
 //  }
+
+
