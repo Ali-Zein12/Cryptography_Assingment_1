@@ -1,4 +1,4 @@
-# Trust but verify!
+# Trust, but verify!
 
 Alice maintains the Bobcoin cryptocurrency investment accounts of 2n clients. Alice diligently keeps
 track of each account balance in her digital ledger, and accurately accounts for all Bobcoins under her
